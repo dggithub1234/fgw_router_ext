@@ -1,1 +1,1 @@
-"""The fgw_router component."""
+"""The fgw_router_ext component."""
