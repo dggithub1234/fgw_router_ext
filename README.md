@@ -1,5 +1,5 @@
 # fgw_router
-Home Assistant device_tracker implementation for Altice Fiber Gateway GR241AG
+Home Assistant device_tracker_ext implementation for Altice Fiber Gateway GR241AG
 
 ![router](https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQbkuz3EpT-XWHLZlPKgxVSAcrZgd8pn8j7yg&usqp=CAU)
 
@@ -12,7 +12,7 @@ It isn't part of the defaults but you can add it by going to:
 and adding:
 
 Repository:<br/>
-`queimadus/fgw_router`<br/>
+`dggithub1234/fgw_router_ext`<br/>
 Category:<br/>
 `Integration`
 
@@ -22,7 +22,7 @@ Category:<br/>
 
 ```
 device_tracker:
-  - platform: fgw_router
+  - platform: fgw_router_ext
     host: 192.168.1.254
     port: 23
     username: !secret fgw_router_username
