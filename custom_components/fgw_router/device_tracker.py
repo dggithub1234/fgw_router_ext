@@ -1,7 +1,9 @@
-"""Support for Altice FGW routers."""
+"""Support for Altice / MEO FiberGateway routers and extenders."""
+
 import logging
 import re
 import telnetlib
+from contextlib import closing
 
 import voluptuous as vol
 
@@ -15,29 +17,34 @@ import homeassistant.helpers.config_validation as cv
 
 _LOGGER = logging.getLogger(__name__)
 
-_DEVICES_REGEX = re.compile(
-    r"(?P<mac>(([0-9A-F]{2}[:-]){5}([0-9A-F]{2})))\s*\|\s*Yes"
+# Regex to match MAC addresses and connection status from DHCP leases
+_DHCP_REGEX = re.compile(
+    r"(?P<mac>([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}).*?\|\s*(?P<port>[a-z0-9\.]+)\s*\|\s*(?P<active>true|false)",
+    re.IGNORECASE,
 )
 
+# Regex for legacy wireless command
+_WIFI_REGEX = re.compile(r"(?P<mac>([0-9A-F]{2}[:-]){5}[0-9A-F]{2})\s*\|\s*Yes", re.IGNORECASE)
+
+# Configuration schema
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
     {
         vol.Required(CONF_HOST): cv.string,
         vol.Required(CONF_PORT): cv.port,
-        vol.Required(CONF_PASSWORD): cv.string,
         vol.Required(CONF_USERNAME): cv.string,
+        vol.Required(CONF_PASSWORD): cv.string,
     }
 )
 
 
 def get_scanner(hass, config):
-    """Validate the configuration and return a FGW scanner."""
+    """Validate configuration and return FGW scanner."""
     scanner = FGWDeviceScanner(config[DOMAIN])
-
     return scanner if scanner.success_init else None
 
 
 class FGWDeviceScanner(DeviceScanner):
-    """This class queries a router running FGW firmware."""
+    """Scanner for devices connected to an Altice / MEO FiberGateway router."""
 
     def __init__(self, config):
         """Initialize the scanner."""
@@ -47,64 +54,102 @@ class FGWDeviceScanner(DeviceScanner):
         self.password = config[CONF_PASSWORD]
         self.interfaces = [0, 1]
         self.last_results = []
+        self.success_init = self._test_connection()
 
-        # Test the router is accessible.
-        data = self.get_fgw_data()
-        self.success_init = data is not None
+    def _test_connection(self):
+        """Check router accessibility."""
+        return self._fetch_fgw_data() is not None
 
     def scan_devices(self):
-        """Scan for new devices and return a list with found device IDs."""
-        self._update_info()
-        return self.last_results
+        """Scan and return list of connected device MAC addresses."""
+        if self._update_info():
+            return self.last_results
+        return []
 
     def get_device_name(self, device):
-        """Return the name of the given device or None if we don't know."""
+        """Return the name of a device (not available)."""
         return None
 
     def _update_info(self):
-        """Ensure the information from the FGW router is up to date.
-
-        Return boolean if scanning successful.
-        """
+        """Refresh device list."""
         if not self.success_init:
+            _LOGGER.warning("FGW scanner initialization failed.")
             return False
 
-        _LOGGER.info("Checking ARP")
-        data = self.get_fgw_data()
+        _LOGGER.debug("Fetching DHCP lease data from FGW router.")
+        data = self._fetch_fgw_data()
         if not data:
+            _LOGGER.error("Failed to fetch device list from FGW router.")
             return False
 
         self.last_results = data
         return True
 
-    def get_fgw_data(self):
-        """Retrieve data from FGW and return parsed result."""
+    def _fetch_fgw_data(self):
+        """Retrieve and parse connected devices from FGW router."""
         try:
-            telnet = telnetlib.Telnet(self.host, self.port, 30)
-            telnet.read_until(b"Login: ", 30)
-            telnet.write((self.username + "\r\n").encode("ascii"))
-            telnet.read_until(b"Password: ", 30)
-            telnet.write((self.password + "\r\n").encode("ascii"))
-            telnet.read_until(b"cli> ", 30)
-            devices_result = []
-            for i in self.interfaces:
-                telnet.write(("wireless/show-stationinfo --wifi-index=" + str(i) + "\r\n").encode("ascii"))
-                devices_result = devices_result + telnet.read_until(b"cli> ", 30).split(b"\r\n")
-            telnet.write("quit\r\n".encode("ascii"))
-            telnet.close()
-        except EOFError:
-            _LOGGER.exception("Unexpected response from router")
-            telnet.close()
-            return
-        except ConnectionRefusedError:
-            _LOGGER.exception("Connection refused by router. Telnet enabled?")
-            telnet.close()
-            return
+            with closing(telnetlib.Telnet(self.host, self.port, timeout=30)) as telnet:
+                telnet.read_until(b"Login: ", timeout=30)
+                telnet.write(f"{self.username}\r\n".encode("ascii"))
 
+                telnet.read_until(b"Password: ", timeout=30)
+                telnet.write(f"{self.password}\r\n".encode("ascii"))
+
+                telnet.read_until(b"cli> ", timeout=30)
+
+                # Prefer the newer DHCP lease command
+                telnet.write(b"lan/dhcp/show\r\n")
+                output = telnet.read_until(b"cli> ", timeout=30)
+                telnet.write(b"quit\r\n")
+
+        except (EOFError, ConnectionRefusedError) as err:
+            _LOGGER.exception("Telnet connection error: %s", err)
+            return None
+        except Exception as err:
+            _LOGGER.exception("Unexpected error communicating with FGW router: %s", err)
+            return None
+
+        decoded = output.decode("utf-8", errors="ignore")
+
+        # Try to parse DHCP lease table first
         devices = []
-        for device in devices_result:
-            match = _DEVICES_REGEX.search(device.decode("utf-8"))
-            if match:
-	            devices.append(match.group("mac").upper())
+        for match in _DHCP_REGEX.finditer(decoded):
+            mac = match.group("mac").upper()
+            active = match.group("active").lower() == "true"
+            port = match.group("port")
+            if active:
+                devices.append(mac)
+                _LOGGER.debug("Found active device %s on port %s", mac, port)
 
-        return devices
+        if devices:
+            _LOGGER.info("Discovered %d active devices (including extender connections).", len(devices))
+            return devices
+
+        # Fallback: use legacy wireless commands if DHCP parsing failed
+        _LOGGER.warning("DHCP table empty, falling back to wireless station info.")
+        all_lines = []
+        try:
+            with closing(telnetlib.Telnet(self.host, self.port, timeout=30)) as telnet:
+                telnet.read_until(b"Login: ", timeout=30)
+                telnet.write(f"{self.username}\r\n".encode("ascii"))
+                telnet.read_until(b"Password: ", timeout=30)
+                telnet.write(f"{self.password}\r\n".encode("ascii"))
+                telnet.read_until(b"cli> ", timeout=30)
+
+                for idx in self.interfaces:
+                    cmd = f"wireless/show-stationinfo --wifi-index={idx}\r\n"
+                    telnet.write(cmd.encode("ascii"))
+                    all_lines.extend(telnet.read_until(b"cli> ", timeout=30).split(b"\r\n"))
+                telnet.write(b"quit\r\n")
+
+        except Exception as err:
+            _LOGGER.error("Fallback wireless scan failed: %s", err)
+            return None
+
+        for line in all_lines:
+            match = _WIFI_REGEX.search(line.decode("utf-8", errors="ignore"))
+            if match:
+                devices.append(match.group("mac").upper())
+
+        _LOGGER.info("Discovered %d devices via wireless fallback.", len(devices))
+        return devices or None
