@@ -1,8 +1,8 @@
 {
-  "domain": "fgw_router",
-  "name": "fgw_router",
-  "documentation": "https://github.com/queimadus/fgw_router",
-  "version": "1.0.0",
+  "domain": "fgw_router_ext",
+  "name": "fgw_router_ext",
+  "documentation": "https://github.com/dggithub1234/fgw_router_ext",
+  "version": "1.1.0",
   "requirements": [],
   "dependencies": [],
   "codeowners": []
