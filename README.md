@@ -1,5 +1,5 @@
 # fgw_router_ext
-Home Assistant device_tracker_ext implementation for Altice Fiber Gateway GR241AG
+Home Assistant device_tracker_ext implementation for the MEO router Altice Fiber Gateway GR241AG with or without MEO extenders
 
 ![router](https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQbkuz3EpT-XWHLZlPKgxVSAcrZgd8pn8j7yg&usqp=CAU)
 
