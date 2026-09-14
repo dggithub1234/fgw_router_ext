@@ -9,12 +9,12 @@ from homeassistant import config_entries
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_PORT, CONF_USERNAME
 from homeassistant.data_entry_flow import FlowResult
 
-# Import the functional telnet checker from your device_tracker file
-from .device_tracker import fetch_fgw_data
+# Use an absolute import path to completely bypass structural import errors
+from custom_components.fgw_router_ext.device_tracker import fetch_fgw_data
 
 _LOGGER = logging.getLogger(__name__)
 
-DOMAIN = "fgw_router_ext"  # Make sure this matches your folder name
+DOMAIN = "fgw_router_ext"
 
 
 class FiberGatewayConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -34,22 +34,19 @@ class FiberGatewayConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             username = user_input[CONF_USERNAME]
             password = user_input[CONF_PASSWORD]
 
-            # Validate the connection before creating the configuration entry
             try:
                 result = await fetch_fgw_data(host, port, username, password)
                 if result is not None:
-                    # Connection succeeded! Create the entity registry mapping.
                     return self.async_create_entry(
                         title=f"FiberGateway ({host})", 
                         data=user_input
                     )
                 
                 errors["base"] = "cannot_connect"
-            except Exception as err:  # pylint: disable=broad-except
+            except Exception as err:
                 _LOGGER.error("Failed to connect to FiberGateway: %s", err)
                 errors["base"] = "unknown"
 
-        # Form schema shown to the user in the UI
         data_schema = vol.Schema(
             {
                 vol.Required(CONF_HOST): str,
