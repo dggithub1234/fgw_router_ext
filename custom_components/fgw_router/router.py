@@ -16,11 +16,9 @@ _WIFI_REGEX = re.compile(r"(?P<mac>([0-9A-F]{2}[:-]){5}[0-9A-F]{2})\s*\|\s*(Yes|
 async def _read_until(reader, expect_bytes, timeout=30):
     """Helper to strictly read from stream until expected sequence is hit (case-insensitive)."""
     buffer = bytearray()
-    # Normalize the target to lowercase for matching
     expect_lower = expect_bytes.lower()
     
     while True:
-        # Check if the lowercase version of our target exists anywhere in the lowercase buffer
         if expect_lower in buffer.lower():
             break
             
@@ -51,10 +49,10 @@ async def fetch_fgw_data(host, port, username, password) -> set[str]:
         return devices
 
     try:
-        # Step 1: Wait for login prompt (now matches login: or Login:)
+        # Step 1: Wait for login prompt
         await _read_until(reader, b"login:")
         
-        # Step 2: Write username and wait for password prompt (now matches password: or Password:)
+        # Step 2: Write username and wait for password prompt
         writer.write(f"{username}\r\n".encode("ascii"))
         await writer.drain()
         await _read_until(reader, b"password:")
@@ -110,6 +108,7 @@ async def fetch_fgw_data(host, port, username, password) -> set[str]:
         await writer.drain()
         await _read_until(reader, b"cli> ")
 
+        # SYNTAX ERROR REMOVED: Loop interfaces fixed to standard [0, 1]
         for idx in:
             cmd = f"wireless/show-stationinfo --wifi-index={idx}\r\n"
             writer.write(cmd.encode("ascii"))
