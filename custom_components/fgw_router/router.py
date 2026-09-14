@@ -14,9 +14,16 @@ _WIFI_REGEX = re.compile(r"(?P<mac>([0-9A-F]{2}[:-]){5}[0-9A-F]{2})\s*\|\s*(Yes|
 
 
 async def _read_until(reader, expect_bytes, timeout=30):
-    """Helper to strictly read from stream until expected sequence is hit."""
+    """Helper to strictly read from stream until expected sequence is hit (case-insensitive)."""
     buffer = bytearray()
-    while expect_bytes not in buffer:
+    # Normalize the target to lowercase for matching
+    expect_lower = expect_bytes.lower()
+    
+    while True:
+        # Check if the lowercase version of our target exists anywhere in the lowercase buffer
+        if expect_lower in buffer.lower():
+            break
+            
         try:
             chunk = await asyncio.wait_for(reader.read(1024), timeout=timeout)
             if not chunk:
@@ -44,19 +51,25 @@ async def fetch_fgw_data(host, port, username, password) -> set[str]:
         return devices
 
     try:
+        # Step 1: Wait for login prompt (now matches login: or Login:)
         await _read_until(reader, b"login:")
+        
+        # Step 2: Write username and wait for password prompt (now matches password: or Password:)
         writer.write(f"{username}\r\n".encode("ascii"))
         await writer.drain()
-        
         await _read_until(reader, b"password:")
+        
+        # Step 3: Write password and wait for cli prompt
         writer.write(f"{password}\r\n".encode("ascii"))
         await writer.drain()
         await _read_until(reader, b"cli> ")
 
+        # Step 4: Write command to retrieve leases
         writer.write(b"lan/dhcp/show\r\n")
         await writer.drain()
         output = await _read_until(reader, b"cli> ")
         
+        # Step 5: Quit gracefully
         writer.write(b"quit\r\n")
         await writer.drain()
         
@@ -97,8 +110,7 @@ async def fetch_fgw_data(host, port, username, password) -> set[str]:
         await writer.drain()
         await _read_until(reader, b"cli> ")
 
-        # FIXED SYNTAX HERE: Added explicit wireless interface index mapping back
-        for idx in [0, 1]:
+        for idx in:
             cmd = f"wireless/show-stationinfo --wifi-index={idx}\r\n"
             writer.write(cmd.encode("ascii"))
             await writer.drain()
