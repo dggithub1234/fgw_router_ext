@@ -16,16 +16,16 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-# Reuse your configuration constants
 from homeassistant.const import CONF_HOST, CONF_PORT, CONF_PASSWORD, CONF_USERNAME
 
 _LOGGER = logging.getLogger(__name__)
 
+# Resilient parsing matching both standard formats
 _DHCP_REGEX = re.compile(
-    r"(?P<mac>([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}).*?\|\s*(?P<port>[a-z0-9\.]+)\s*\|\s*(?P<active>true|false)",
+    r"(?P<mac>([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}).*?\|\s*(?P<port>[a-zA-Z0-9\.\-_ ]+?)\s*\|\s*(?P<active>true|false|active|yes|1)",
     re.IGNORECASE,
 )
-_WIFI_REGEX = re.compile(r"(?P<mac>([0-9A-F]{2}[:-]){5}[0-9A-F]{2})\s*\|\s*Yes", re.IGNORECASE)
+_WIFI_REGEX = re.compile(r"(?P<mac>([0-9A-F]{2}[:-]){5}[0-9A-F]{2})\s*\|\s*(Yes|Active|1)", re.IGNORECASE)
 
 
 async def async_setup_entry(
@@ -35,7 +35,6 @@ async def async_setup_entry(
 ) -> None:
     """Set up FiberGateway modern device tracker entities from a config entry."""
     
-    # Define the fetch function wrapped by the coordinator
     async def async_update_router_data() -> set[str]:
         try:
             return await fetch_fgw_data(
@@ -45,9 +44,8 @@ async def async_setup_entry(
                 entry.data[CONF_PASSWORD]
             )
         except Exception as err:
-            raise UpdateFailed(f"Error communicating with FGW router: {err}")
+            raise UpdateFailed(f"Communication issue with FGW router: {err}")
 
-    # Create the coordinator to poll the router every 30 seconds
     coordinator = DataUpdateCoordinator(
         hass,
         _LOGGER,
@@ -56,7 +54,7 @@ async def async_setup_entry(
         update_interval=timedelta(seconds=30),
     )
 
-    # First fetch before adding entities
+    # Fetch initial state
     await coordinator.async_config_entry_first_refresh()
 
     tracked_macs: set[str] = set()
@@ -76,10 +74,7 @@ async def async_setup_entry(
 
         async_add_entities(entities)
 
-    # Watch for newly discovered network items on future polls
     entry.async_on_unload(coordinator.async_add_listener(async_discover_devices))
-    
-    # Initialize already active ones
     async_discover_devices()
 
 
@@ -87,14 +82,13 @@ class FGWScannerEntity(ScannerEntity):
     """Representation of a device tracked via the modern FiberGateway integration."""
 
     _attr_has_entity_name = True
-    _attr_should_poll = False  # Controlled entirely via Coordinator updates
+    _attr_should_poll = False
 
     def __init__(self, coordinator: DataUpdateCoordinator, mac: str) -> None:
         """Initialize the tracker entity."""
         self.coordinator = coordinator
         self._mac = mac
-        self._attr_unique_id = f"fgw_{mac.replace(':', '').lower()}"
-        # Entity fallback name if no manual name override exists
+        self._attr_unique_id = f"fgw_{mac.replace(':', '').replace('-', '').lower()}"
         self._attr_name = f"Device {mac}"
 
     @property
@@ -117,83 +111,115 @@ class FGWScannerEntity(ScannerEntity):
         self.async_on_unload(self.coordinator.async_add_listener(self.async_write_ha_state))
 
 
-# --- Raw Connection Logic Restructured safely for Async Core ---
-
-async def _async_telnet_command(reader, writer, command_bytes, expect_bytes):
-    """Helper to send a command and wait for a response sequence."""
-    writer.write(command_bytes)
-    await writer.drain()
-    
+async def _read_until(reader, expect_bytes, timeout=30):
+    """Helper to strictly read from stream until expected sequence is hit."""
     buffer = bytearray()
     while expect_bytes not in buffer:
-        chunk = await asyncio.wait_for(reader.read(1024), timeout=30)
-        if not chunk:
-            break
-        buffer.extend(chunk)
+        try:
+            chunk = await asyncio.wait_for(reader.read(1024), timeout=timeout)
+            if not chunk:
+                break
+            buffer.extend(chunk)
+        except asyncio.TimeoutError:
+            _LOGGER.error(
+                "Telnet stream timed out waiting for sequence: %s. Current Buffer: %s",
+                expect_bytes,
+                buffer.decode("utf-8", errors="ignore")
+            )
+            raise
     return bytes(buffer)
 
 
 async def fetch_fgw_data(host, port, username, password) -> set[str]:
     """Retrieve and parse connected devices from FGW router asynchronously."""
     devices = set()
+    
     try:
         connect = asyncio.open_connection(host, port)
-        reader, writer = await asyncio.wait_for(connect, timeout=10)
+        reader, writer = await asyncio.wait_for(connect, timeout=15)
     except Exception as err:
-        _LOGGER.error("Failed to establish TCP connection to %s:%s: %s", host, port, err)
+        _LOGGER.error("Unable to open TCP connection to FiberGateway at %s:%s - %s", host, port, err)
         return devices
 
     try:
-        await _async_telnet_command(reader, writer, b"", b"Login: ")
-        await _async_telnet_command(reader, writer, f"{username}\r\n".encode("ascii"), b"Password: ")
-        output = await _async_telnet_command(reader, writer, f"{password}\r\n".encode("ascii"), b"cli> ")
-
-        # Fetch primary DHCP list
-        output = await _async_telnet_command(reader, writer, b"lan/dhcp/show\r\n", b"cli> ")
+        # Step 1: Wait for initial login prompt without sending prior data
+        await _read_until(reader, b"Login: ")
         
+        # Step 2: Write username and wait for Password prompt
+        writer.write(f"{username}\r\n".encode("ascii"))
+        await writer.drain()
+        await _read_until(reader, b"Password: ")
+        
+        # Step 3: Write password and wait for cli prompt
+        writer.write(f"{password}\r\n".encode("ascii"))
+        await writer.drain()
+        await _read_until(reader, b"cli> ")
+
+        # Step 4: Write command to retrieve leases
+        writer.write(b"lan/dhcp/show\r\n")
+        await writer.drain()
+        output = await _read_until(reader, b"cli> ")
+        
+        # Step 5: Quit gracefully
         writer.write(b"quit\r\n")
         await writer.drain()
+        
     except Exception as err:
-        _LOGGER.error("Telnet communication error: %s", err)
+        _LOGGER.error("Telnet execution broke during router conversation exchange: %s", err)
         return devices
     finally:
-        writer.close()
-        await writer.wait_closed()
+        try:
+            writer.close()
+            await writer.wait_closed()
+        except Exception:
+            pass
 
     decoded = output.decode("utf-8", errors="ignore")
+    _LOGGER.debug("Parsed Data Table Response: %s", decoded)
 
     for match in _DHCP_REGEX.finditer(decoded):
         mac = match.group("mac").upper()
-        if match.group("active").lower() == "true":
+        active_val = match.group("active").lower()
+        if active_val in ("true", "active", "yes", "1"):
             devices.add(mac)
 
     if devices:
         return devices
 
-    # Fallback to wireless station commands if DHCP parse yields nothing
+    # Fallback to wireless station list if DHCP parsing is empty
     _LOGGER.warning("DHCP table empty, dropping into legacy wifi station check.")
     all_lines = []
     try:
         connect = asyncio.open_connection(host, port)
-        reader, writer = await asyncio.wait_for(connect, timeout=10)
+        reader, writer = await asyncio.wait_for(connect, timeout=15)
         
-        await _async_telnet_command(reader, writer, b"", b"Login: ")
-        await _async_telnet_command(reader, writer, f"{username}\r\n".encode("ascii"), b"Password: ")
-        await _async_telnet_command(reader, writer, f"{password}\r\n".encode("ascii"), b"cli> ")
+        await _read_until(reader, b"Login: ")
+        writer.write(f"{username}\r\n".encode("ascii"))
+        await writer.drain()
+        
+        await _read_until(reader, b"Password: ")
+        writer.write(f"{password}\r\n".encode("ascii"))
+        await writer.drain()
+        await _read_until(reader, b"cli> ")
 
-        for idx in [0, 1]:  # interfaces
+        for idx in [0, 1]:
             cmd = f"wireless/show-stationinfo --wifi-index={idx}\r\n"
-            out = await _async_telnet_command(reader, writer, cmd.encode("ascii"), b"cli> ")
+            writer.write(cmd.encode("ascii"))
+            await writer.drain()
+            out = await _read_until(reader, b"cli> ")
             all_lines.extend(out.split(b"\r\n"))
             
         writer.write(b"quit\r\n")
         await writer.drain()
     except Exception as err:
-        _LOGGER.error("Fallback scan broke: %s", err)
+        _LOGGER.error("Fallback wireless communication failed: %s", err)
         return devices
     finally:
-        writer.close()
-        await writer.wait_closed()
+        try:
+            writer.close()
+            await writer.wait_closed()
+        except Exception:
+            pass
 
     for line in all_lines:
         match = _WIFI_REGEX.search(line.decode("utf-8", errors="ignore"))
