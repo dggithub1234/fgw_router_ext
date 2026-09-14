@@ -109,7 +109,7 @@ async def fetch_fgw_data(host, port, username, password) -> set[str]:
         await _read_until(reader, b"cli> ")
 
         # SYNTAX ERROR REMOVED: Loop interfaces fixed to standard [0, 1]
-        for idx in:
+        for idx in [0, 1]:
             cmd = f"wireless/show-stationinfo --wifi-index={idx}\r\n"
             writer.write(cmd.encode("ascii"))
             await writer.drain()
