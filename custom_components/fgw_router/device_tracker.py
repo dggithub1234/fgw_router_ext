@@ -142,13 +142,13 @@ async def fetch_fgw_data(host, port, username, password) -> set[str]:
         return devices
 
     try:
-        # Step 1: Wait for initial login prompt without sending prior data
-        await _read_until(reader, b"Login: ")
+        # Step 1: Wait for lowercase login prompt from Yocto build
+        await _read_until(reader, b"login:")
         
-        # Step 2: Write username and wait for Password prompt
+        # Step 2: Write username and wait for lowercase password prompt
         writer.write(f"{username}\r\n".encode("ascii"))
         await writer.drain()
-        await _read_until(reader, b"Password: ")
+        await _read_until(reader, b"password:")
         
         # Step 3: Write password and wait for cli prompt
         writer.write(f"{password}\r\n".encode("ascii"))
@@ -193,16 +193,16 @@ async def fetch_fgw_data(host, port, username, password) -> set[str]:
         connect = asyncio.open_connection(host, port)
         reader, writer = await asyncio.wait_for(connect, timeout=15)
         
-        await _read_until(reader, b"Login: ")
+        await _read_until(reader, b"login:")
         writer.write(f"{username}\r\n".encode("ascii"))
         await writer.drain()
         
-        await _read_until(reader, b"Password: ")
+        await _read_until(reader, b"password:")
         writer.write(f"{password}\r\n".encode("ascii"))
         await writer.drain()
         await _read_until(reader, b"cli> ")
 
-        for idx in [0, 1]:
+        for idx in:
             cmd = f"wireless/show-stationinfo --wifi-index={idx}\r\n"
             writer.write(cmd.encode("ascii"))
             await writer.drain()
