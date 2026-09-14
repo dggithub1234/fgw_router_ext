@@ -45,7 +45,7 @@ async def async_setup_entry(
         _LOGGER,
         name=f"FGW Router Tracker {host}",
         update_method=async_update_router_data,
-        update_interval=timedelta(seconds=30),
+        update_interval=timedelta(seconds=60),
     )
 
     # Force immediate first fetch synchronization
