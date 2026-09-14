@@ -97,7 +97,8 @@ async def fetch_fgw_data(host, port, username, password) -> set[str]:
         await writer.drain()
         await _read_until(reader, b"cli> ")
 
-        for idx in:
+        # FIXED SYNTAX HERE: Added explicit wireless interface index mapping back
+        for idx in [0, 1]:
             cmd = f"wireless/show-stationinfo --wifi-index={idx}\r\n"
             writer.write(cmd.encode("ascii"))
             await writer.drain()
