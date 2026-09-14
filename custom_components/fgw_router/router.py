@@ -61,7 +61,7 @@ async def fetch_fgw_data(host, port, username, password) -> set[str]:
         await writer.drain()
         
     except Exception as err:
-        _LOGGER.error("Telnet execution broke during router conversation exchange: %s", err)
+        _LOGGER.exception("Telnet execution broke during router conversation exchange: %s", err)
         return devices
     finally:
         try:
