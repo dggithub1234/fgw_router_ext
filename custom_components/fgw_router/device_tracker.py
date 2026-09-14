@@ -126,7 +126,7 @@ async def _async_telnet_command(reader, writer, command_bytes, expect_bytes):
     
     buffer = bytearray()
     while expect_bytes not in buffer:
-        chunk = await asyncio.wait_for(reader.read(1024), timeout=10)
+        chunk = await asyncio.wait_for(reader.read(1024), timeout=30)
         if not chunk:
             break
         buffer.extend(chunk)
