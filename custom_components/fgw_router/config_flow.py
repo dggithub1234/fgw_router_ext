@@ -14,7 +14,7 @@ from .device_tracker import fetch_fgw_data
 
 _LOGGER = logging.getLogger(__name__)
 
-DOMAIN = "meo_fibergateway"  # Make sure this matches your folder name
+DOMAIN = "fgw_router_ext"  # Make sure this matches your folder name
 
 
 class FiberGatewayConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
