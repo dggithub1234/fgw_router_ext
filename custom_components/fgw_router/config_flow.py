@@ -31,7 +31,7 @@ class FiberGatewayConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     user_input[CONF_USERNAME],
                     user_input[CONF_PASSWORD],
                 )
-                if result is not None:
+                if result:
                     return self.async_create_entry(
                         title=f"FiberGateway ({user_input[CONF_HOST]})", 
                         data=user_input
