@@ -19,13 +19,12 @@ Category:<br/>
 ### Configuration
 
 #### Input the following integration setup:
-....    
+
     host: 192.168.1.254
     port: 23
     (If you haven't changed the default credentials, these are the default ones)
     username: meo
     password: meo
-....
 
 #### Restart Home assistant
 Restart so the changes can take place.
@@ -35,7 +34,7 @@ Restart so the changes can take place.
 Trackers are automatically added and can be renamed in the UI.
 
 You can turn off automatic tracking in the UI as follows:
-....
+
     Go to Settings 
     ➔ Devices & Services.
     Find your Altice / MEO FiberGateway integration card.
@@ -43,6 +42,6 @@ You can turn off automatic tracking in the UI as follows:
     Click System options.
     Toggle OFF the setting that says "Enable newly added entities".
     Click Save.
-....
+
 
 
