@@ -24,25 +24,31 @@ async def async_setup_entry(
 ) -> None:
     """Set up FiberGateway modern device tracker entities from a config entry."""
     
+    # Securely extract and lock credentials from the entry data profile
+    host = entry.data[CONF_HOST]
+    port = entry.data[CONF_PORT]
+    username = entry.data[CONF_USERNAME]
+    password = entry.data[CONF_PASSWORD]
+    
     async def async_update_router_data() -> set[str]:
         try:
-            return await fetch_fgw_data(
-                entry.data[CONF_HOST],
-                entry.data[CONF_PORT],
-                entry.data[CONF_USERNAME],
-                entry.data[CONF_PASSWORD]
-            )
+            # Pass the statically bound variables into the background worker
+            data = await fetch_fgw_data(host, port, username, password)
+            if data is None:
+                raise UpdateFailed("Router returned empty or invalid device table")
+            return data
         except Exception as err:
             raise UpdateFailed(f"Communication issue with FGW router: {err}")
 
     coordinator = DataUpdateCoordinator(
         hass,
         _LOGGER,
-        name=f"FGW Router Tracker {entry.data[CONF_HOST]}",
+        name=f"FGW Router Tracker {host}",
         update_method=async_update_router_data,
         update_interval=timedelta(seconds=30),
     )
 
+    # Force immediate first fetch synchronization
     await coordinator.async_config_entry_first_refresh()
     tracked_macs: set[str] = set()
 
@@ -50,6 +56,9 @@ async def async_setup_entry(
     def async_discover_devices() -> None:
         """Dynamically add entities if new MACs appear in the router table."""
         active_macs = coordinator.data
+        if not active_macs:
+            return
+            
         new_macs = active_macs - tracked_macs
         if not new_macs:
             return
