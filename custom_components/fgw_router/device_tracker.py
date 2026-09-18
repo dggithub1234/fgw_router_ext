@@ -9,9 +9,15 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
-from homeassistant.const import CONF_HOST, CONF_PORT, CONF_PASSWORD, CONF_USERNAME
+from homeassistant.const import (
+    CONF_HOST, 
+    CONF_PORT, 
+    CONF_PASSWORD, 
+    CONF_USERNAME,
+    CONF_SCAN_INTERVAL,
+    CONF_TRACK_NEW_DEVICES,
+)
 
-# Import network worker from internal router client
 from .router import fetch_fgw_data
 
 _LOGGER = logging.getLogger(__name__)
@@ -24,15 +30,16 @@ async def async_setup_entry(
 ) -> None:
     """Set up FiberGateway modern device tracker entities from a config entry."""
     
-    # Securely extract and lock credentials from the entry data profile
     host = entry.data[CONF_HOST]
     port = entry.data[CONF_PORT]
     username = entry.data[CONF_USERNAME]
     password = entry.data[CONF_PASSWORD]
     
+    # Read configuration from options first, falling back to initial data
+    scan_interval = entry.options.get(CONF_SCAN_INTERVAL, entry.data.get(CONF_SCAN_INTERVAL, 60))
+    
     async def async_update_router_data() -> set[str]:
         try:
-            # Pass the statically bound variables into the background worker
             data = await fetch_fgw_data(host, port, username, password)
             if data is None:
                 raise UpdateFailed("Router returned empty or invalid device table")
@@ -45,10 +52,9 @@ async def async_setup_entry(
         _LOGGER,
         name=f"FGW Router Tracker {host}",
         update_method=async_update_router_data,
-        update_interval=timedelta(seconds=60),
+        update_interval=timedelta(seconds=scan_interval),
     )
 
-    # Force immediate first fetch synchronization
     await coordinator.async_config_entry_first_refresh()
     tracked_macs: set[str] = set()
 
@@ -63,13 +69,25 @@ async def async_setup_entry(
         if not new_macs:
             return
 
+        # Always read this live from options so it catches changes instantly mid-run
+        track_new_devices = entry.options.get(CONF_TRACK_NEW_DEVICES, entry.data.get(CONF_TRACK_NEW_DEVICES, True))
+
         entities = []
         for mac in new_macs:
-            entities.append(FGWScannerEntity(coordinator, mac))
+            enabled_by_default = track_new_devices
+            entities.append(FGWScannerEntity(coordinator, mac, enabled_by_default))
             tracked_macs.add(mac)
 
         async_add_entities(entities)
 
+    # Listen for live configuration option modifications
+    async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
+        """Handle options update."""
+        new_interval = entry.options.get(CONF_SCAN_INTERVAL, 60)
+        _LOGGER.debug("Updating FGW scan interval to %s seconds", new_interval)
+        coordinator.update_interval = timedelta(seconds=new_interval)
+
+    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     entry.async_on_unload(coordinator.async_add_listener(async_discover_devices))
     async_discover_devices()
 
@@ -80,12 +98,13 @@ class FGWScannerEntity(ScannerEntity):
     _attr_has_entity_name = True
     _attr_should_poll = False
 
-    def __init__(self, coordinator: DataUpdateCoordinator, mac: str) -> None:
+    def __init__(self, coordinator: DataUpdateCoordinator, mac: str, enabled_by_default: bool = True) -> None:
         """Initialize the tracker entity."""
         self.coordinator = coordinator
         self._mac = mac
         self._attr_unique_id = f"fgw_{mac.replace(':', '').replace('-', '').lower()}"
         self._attr_name = f"Device {mac}"
+        self._attr_entity_registry_enabled_default = enabled_by_default
 
     @property
     def source_type(self) -> SourceType:
