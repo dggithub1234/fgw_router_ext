@@ -7,9 +7,10 @@ import re
 _LOGGER = logging.getLogger(__name__)
 
 _DHCP_REGEX = re.compile(
-    r"(?P<mac>([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}).*?\|\s*(?P<port>[a-zA-Z0-9\.\-_ ]+?)\s*\|\s*(?P<active>true|false|active|yes|1)",
+    r"(?P<mac>([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}).*?\|\s*(?P<port>[a-z0-9\.]+)\s*\|\s*(?P<active>true|false)",
     re.IGNORECASE,
 )
+
 _WIFI_REGEX = re.compile(r"(?P<mac>([0-9A-F]{2}[:-]){5}[0-9A-F]{2})\s*\|\s*(Yes|Active|1)", re.IGNORECASE)
 
 
@@ -87,7 +88,7 @@ async def fetch_fgw_data(host, port, username, password) -> set[str]:
     for match in _DHCP_REGEX.finditer(decoded):
         mac = match.group("mac").upper()
         active_val = match.group("active").lower()
-        if active_val in ("true", "active", "yes", "1"):
+        if active_val == "true":
             devices.add(mac)
 
     if devices:
