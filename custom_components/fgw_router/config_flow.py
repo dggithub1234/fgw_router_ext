@@ -5,7 +5,15 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant import config_entries
-from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_PORT, CONF_USERNAME
+from homeassistant.const import (
+    CONF_HOST, 
+    CONF_PASSWORD, 
+    CONF_PORT, 
+    CONF_USERNAME,
+    CONF_SCAN_INTERVAL,
+    CONF_TRACK_NEW_DEVICES,
+)
+from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
 
 from .router import fetch_fgw_data
@@ -18,6 +26,12 @@ class FiberGatewayConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Altice / MEO FiberGateway."""
 
     VERSION = 1
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: config_entries.ConfigEntry) -> config_entries.OptionsFlow:
+        """Get the options flow for this handler."""
+        return FiberGatewayOptionsFlowHandler(config_entry)
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Handle the initial user form configuration step."""
@@ -47,7 +61,39 @@ class FiberGatewayConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_PORT, default=23): int,
                 vol.Required(CONF_USERNAME): str,
                 vol.Required(CONF_PASSWORD): str,
+                vol.Required(CONF_SCAN_INTERVAL, default=60): vol.All(vol.Coerce(int), vol.Range(min=10)),
+                vol.Required(CONF_TRACK_NEW_DEVICES, default=True): bool,
             }
         )
 
         return self.async_show_form(step_id="user", data_schema=data_schema, errors=errors)
+
+
+class FiberGatewayOptionsFlowHandler(config_entries.OptionsFlow):
+    """Handle options for the Altice / MEO FiberGateway integration."""
+
+    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+        """Initialize options flow."""
+        self.config_entry = config_entry
+
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Manage the options."""
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+
+        # Pull currently saved values as defaults, falling back to initial installation data
+        current_scan_interval = self.config_entry.options.get(
+            CONF_SCAN_INTERVAL, self.config_entry.data.get(CONF_SCAN_INTERVAL, 60)
+        )
+        current_track_new_devices = self.config_entry.options.get(
+            CONF_TRACK_NEW_DEVICES, self.config_entry.data.get(CONF_TRACK_NEW_DEVICES, True)
+        )
+
+        options_schema = vol.Schema(
+            {
+                vol.Required(CONF_SCAN_INTERVAL, default=current_scan_interval): vol.All(vol.Coerce(int), vol.Range(min=10)),
+                vol.Required(CONF_TRACK_NEW_DEVICES, default=current_track_new_devices): bool,
+            }
+        )
+
+        return self.async_show_form(step_id="init", data_schema=options_schema)
