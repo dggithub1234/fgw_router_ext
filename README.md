@@ -1,6 +1,6 @@
 # fgw_router_ext
 Home Assistant device_tracker_ext implementation for the MEO router Altice Fiber Gateway GR241AG with or without MEO extenders
-This version is compatible with the 2027.5 changes to the use of trackers in homeassistant.
+This version is compatible with the 2027.5 changes to the use of trackers in homeassistant but is not backward compatible with existing tracker entities you may already have.
 
 ![router](https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQbkuz3EpT-XWHLZlPKgxVSAcrZgd8pn8j7yg&usqp=CAU)
 
@@ -34,17 +34,14 @@ Restart so the changes can take place.
     username: meo
     password: meo
     scan interval: 60s
+    track new devices (if deselected they are added but disabled)
 
+You can change setup at a later date using the settings option (the cog symbol)
 
 #### Devices:
 Trackers are automatically added and can be renamed in the UI.
 
-
-You can turn off automatic enabling of new devices in the UI as follows:
-(they are still added but disabled)
-
-Do it during setup or,
-    
+You can also turn off automatic enabling of new devices in the UI as follows:
     Go to Settings 
     ➔ Devices & Services.
     Find your Altice / MEO FiberGateway integration card.
