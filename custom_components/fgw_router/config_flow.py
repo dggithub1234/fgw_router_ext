@@ -11,15 +11,14 @@ from homeassistant.const import (
     CONF_PORT, 
     CONF_USERNAME,
     CONF_SCAN_INTERVAL,
-    CONF_TRACK_NEW_DEVICES,
 )
-from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
 
+# Use your new shared constants file
+from .const import DOMAIN, CONF_TRACK_NEW_DEVICES
 from .router import fetch_fgw_data
 
 _LOGGER = logging.getLogger(__name__)
-DOMAIN = "fgw_router_ext"
 
 
 class FiberGatewayConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -28,7 +27,6 @@ class FiberGatewayConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
     @staticmethod
-    @callback
     def async_get_options_flow(config_entry: config_entries.ConfigEntry) -> config_entries.OptionsFlow:
         """Get the options flow for this handler."""
         return FiberGatewayOptionsFlowHandler(config_entry)
@@ -81,7 +79,6 @@ class FiberGatewayOptionsFlowHandler(config_entries.OptionsFlow):
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
-        # Pull currently saved option values as defaults, falling back to initial installation data
         options_schema = vol.Schema(
             {
                 vol.Required(
