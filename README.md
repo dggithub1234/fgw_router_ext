@@ -32,13 +32,18 @@ Restart so the changes can take place.
     (If you haven't changed the default credentials, these are the default ones)
     username: meo
     password: meo
+    scan interval: 60s
 
 
 #### Devices:
 Trackers are automatically added and can be renamed in the UI.
 
+
 You can turn off automatic enabling of new devices in the UI as follows:
 (they are still added but disabled)
+
+Do it during setup or,
+    
     Go to Settings 
     ➔ Devices & Services.
     Find your Altice / MEO FiberGateway integration card.
