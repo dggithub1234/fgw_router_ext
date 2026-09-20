@@ -10,12 +10,12 @@ from homeassistant.const import (
     CONF_PASSWORD, 
     CONF_PORT, 
     CONF_USERNAME,
-    CONF_SCAN_INTERVAL,
+    # CONF_SCAN_INTERVAL REMOVED FROM HERE
 )
 from homeassistant.data_entry_flow import FlowResult
 
-# Use your new shared constants file
-from .const import DOMAIN, CONF_TRACK_NEW_DEVICES
+# Import scan interval locally from your own file
+from .const import DOMAIN, CONF_TRACK_NEW_DEVICES, CONF_SCAN_INTERVAL
 from .router import fetch_fgw_data
 
 _LOGGER = logging.getLogger(__name__)
