@@ -14,11 +14,11 @@ from homeassistant.const import (
     CONF_PORT, 
     CONF_PASSWORD, 
     CONF_USERNAME,
-    CONF_SCAN_INTERVAL,
 )
 
-# Import your custom parameters locally from your new file
-from .const import CONF_TRACK_NEW_DEVICES
+# Import your custom parameters locally from your local file
+from .const import CONF_TRACK_NEW_DEVICES, CONF_SCAN_INTERVAL
+
 from .router import fetch_fgw_data
 
 _LOGGER = logging.getLogger(__name__)
