@@ -81,18 +81,21 @@ class FiberGatewayOptionsFlowHandler(config_entries.OptionsFlow):
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
-        # Pull currently saved values as defaults, falling back to initial installation data
-        current_scan_interval = self.config_entry.options.get(
-            CONF_SCAN_INTERVAL, self.config_entry.data.get(CONF_SCAN_INTERVAL, 60)
-        )
-        current_track_new_devices = self.config_entry.options.get(
-            CONF_TRACK_NEW_DEVICES, self.config_entry.data.get(CONF_TRACK_NEW_DEVICES, True)
-        )
-
+        # Pull currently saved option values as defaults, falling back to initial installation data
         options_schema = vol.Schema(
             {
-                vol.Required(CONF_SCAN_INTERVAL, default=current_scan_interval): vol.All(vol.Coerce(int), vol.Range(min=10)),
-                vol.Required(CONF_TRACK_NEW_DEVICES, default=current_track_new_devices): bool,
+                vol.Required(
+                    CONF_SCAN_INTERVAL, 
+                    default=self.config_entry.options.get(
+                        CONF_SCAN_INTERVAL, self.config_entry.data.get(CONF_SCAN_INTERVAL, 60)
+                    )
+                ): vol.All(vol.Coerce(int), vol.Range(min=10)),
+                vol.Required(
+                    CONF_TRACK_NEW_DEVICES, 
+                    default=self.config_entry.options.get(
+                        CONF_TRACK_NEW_DEVICES, self.config_entry.data.get(CONF_TRACK_NEW_DEVICES, True)
+                    )
+                ): bool,
             }
         )
 
