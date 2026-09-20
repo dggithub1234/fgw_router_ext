@@ -1,96 +1,119 @@
-"""Raw Telnet connection client for Altice / MEO FiberGateway."""
+"""Support for Altice / MEO FiberGateway routers and extenders using modern entities."""
 
 import asyncio
+from datetime import timedelta
 import logging
-import re
+
+from homeassistant.components.device_tracker import ScannerEntity, SourceType
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.const import (
+    CONF_HOST, 
+    CONF_PORT, 
+    CONF_PASSWORD, 
+    CONF_USERNAME,
+    CONF_SCAN_INTERVAL,
+    CONF_TRACK_NEW_DEVICES,
+)
+
+from .router import fetch_fgw_data
 
 _LOGGER = logging.getLogger(__name__)
 
-# Your highly optimized regex pattern for strict true/false tracking and alphanumeric/dot ports
-_DHCP_REGEX = re.compile(
-    r"(?P<mac>([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}).*?\|\s*(?P<port>[a-z0-9\.]+)\s*\|\s*(?P<active>true|false)",
-    re.IGNORECASE,
-)
 
-
-async def _read_until(reader, expect_bytes, timeout=30):
-    """Helper to strictly read from stream until expected sequence is hit (case-insensitive)."""
-    buffer = bytearray()
-    expect_lower = expect_bytes.lower()
+async def async_setup_entry(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    async_add_entities: AddConfigEntryEntitiesCallback,
+) -> None:
+    """Set up FiberGateway modern device tracker entities from a config entry."""
     
-    while True:
-        if expect_lower in buffer.lower():
-            break
+    host = entry.data[CONF_HOST]
+    port = entry.data[CONF_PORT]
+    username = entry.data[CONF_USERNAME]
+    password = entry.data[CONF_PASSWORD]
+    
+    # Read configuration from options first, falling back to initial data
+    scan_interval = entry.options.get(CONF_SCAN_INTERVAL, entry.data.get(CONF_SCAN_INTERVAL, 60))
+    
+    async def async_update_router_data() -> set[str]:
+        try:
+            data = await fetch_fgw_data(host, port, username, password)
+            if data is None:
+                raise UpdateFailed("Router returned empty or invalid device table")
+            return data
+        except Exception as err:
+            raise UpdateFailed(f"Communication issue with FGW router: {err}")
+
+    coordinator = DataUpdateCoordinator(
+        hass,
+        _LOGGER,
+        name=f"FGW Router Tracker {host}",
+        update_method=async_update_router_data,
+        update_interval=timedelta(seconds=scan_interval),
+    )
+
+    await coordinator.async_config_entry_first_refresh()
+    tracked_macs: set[str] = set()
+
+    @callback
+    def async_discover_devices() -> None:
+        """Dynamically add entities if new MACs appear in the router table."""
+        active_macs = coordinator.data
+        if not active_macs:
+            return
             
-        try:
-            chunk = await asyncio.wait_for(reader.read(1024), timeout=timeout)
-            if not chunk:
-                break
-            buffer.extend(chunk)
-        except asyncio.TimeoutError:
-            _LOGGER.error(
-                "Telnet stream timed out waiting for sequence: %s. Current Buffer: %s",
-                expect_bytes,
-                buffer.decode("utf-8", errors="ignore")
-            )
-            raise
-    return bytes(buffer)
+        new_macs = active_macs - tracked_macs
+        if not new_macs:
+            return
+
+        # Always read this live from options so it catches changes instantly mid-run
+        track_new_devices = entry.options.get(CONF_TRACK_NEW_DEVICES, entry.data.get(CONF_TRACK_NEW_DEVICES, True))
+
+        entities = []
+        for mac in new_macs:
+            enabled_by_default = track_new_devices
+            entities.append(FGWScannerEntity(coordinator, mac, enabled_by_default))
+            tracked_macs.add(mac)
+
+        async_add_entities(entities)
+
+    # Listen for coordinator updates to discover newly added hardware
+    entry.async_on_unload(coordinator.async_add_listener(async_discover_devices))
+    async_discover_devices()
 
 
-async def fetch_fgw_data(host, port, username, password) -> set[str]:
-    """Retrieve and parse active connected devices from the FGW DHCP table."""
-    devices = set()
-    
-    try:
-        connect = asyncio.open_connection(host, port)
-        reader, writer = await asyncio.wait_for(connect, timeout=15)
-    except Exception as err:
-        _LOGGER.error("Unable to open TCP connection to FiberGateway at %s:%s - %s", host, port, err)
-        return devices
+class FGWScannerEntity(ScannerEntity):
+    """Representation of a device tracked via the modern FiberGateway integration."""
 
-    try:
-        # Step 1: Handle Authentication Exchange
-        await _read_until(reader, b"login:")
-        writer.write(f"{username}\r\n".encode("ascii"))
-        await writer.drain()
-        
-        await _read_until(reader, b"password:")
-        writer.write(f"{password}\r\n".encode("ascii"))
-        await writer.drain()
-        
-        # Wait for the baseline shell prompt to clear
-        await _read_until(reader, b"cli> ")
+    _attr_has_entity_name = True
+    _attr_should_poll = False
 
-        # Step 2: Query the DHCP Lease Table
-        writer.write(b"lan/dhcp/show\r\n")
-        await writer.drain()
-        
-        # Read the full data stream until the router displays the next 'cli> ' prompt completely
-        output = await _read_until(reader, b"cli> ")
-        
-        # Step 3: Close the terminal session cleanly
-        writer.write(b"quit\r\n")
-        await writer.drain()
-        
-    except Exception as err:
-        _LOGGER.error("Telnet communication failure with FiberGateway: %s", err)
-        return devices
-    finally:
-        try:
-            writer.close()
-            await writer.wait_closed()
-        except Exception:
-            pass
+    def __init__(self, coordinator: DataUpdateCoordinator, mac: str, enabled_by_default: bool = True) -> None:
+        """Initialize the tracker entity."""
+        self.coordinator = coordinator
+        self._mac = mac
+        self._attr_unique_id = f"fgw_{mac.replace(':', '').replace('-', '').lower()}"
+        self._attr_name = f"Device {mac}"
+        self._attr_entity_registry_enabled_default = enabled_by_default
 
-    # Step 4: Parse Results
-    decoded = output.decode("utf-8", errors="ignore")
-    _LOGGER.debug("Parsed Data Table Response: %s", decoded)
+    @property
+    def source_type(self) -> SourceType:
+        """Return the tracking source type."""
+        return SourceType.ROUTER
 
-    for match in _DHCP_REGEX.finditer(decoded):
-        mac = match.group("mac").upper()
-        active_val = match.group("active").lower()
-        if active_val == "true":
-            devices.add(mac)
+    @property
+    def mac_address(self) -> str:
+        """Return the mac address of the device."""
+        return self._mac
 
-    _LOGGER.debug("DHCP sweep complete. Found %d active devices.", len(devices))
-    return devices
+    @property
+    def is_connected(self) -> bool:
+        """Return true if the device is currently active on the router."""
+        return self._mac in self.coordinator.data
+
+    async def async_added_to_hass(self) -> None:
+        """Subscribe to coordinator updates."""
+        self.async_on_remove(self.coordinator.async_add_listener(self.async_write_ha_state))
