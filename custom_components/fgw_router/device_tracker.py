@@ -40,8 +40,12 @@ async def async_setup_entry(
         try:
             data = await fetch_fgw_data(host, port, username, password)
             if data is None:
-                raise UpdateFailed("Router returned empty or invalid device table")
-            return data
+                # Return an empty set instead of throwing an error if data is empty.
+                # This ensures entities stay online instead of falling into "unavailable".
+                _LOGGER.debug("Router returned no active devices; treating as empty set.")
+                return set()
+            # Strict conversion to uppercase to match string casing
+            return {mac.upper() for mac in data}
         except Exception as err:
             raise UpdateFailed(f"Communication issue with FGW router: {err}")
 
@@ -59,9 +63,11 @@ async def async_setup_entry(
     @callback
     def async_discover_devices() -> None:
         """Dynamically add entities if new MACs appear in the router table."""
-        active_macs = coordinator.data
-        if not active_macs:
+        if not coordinator.data:
             return
+            
+        # Ensure incoming data is strictly uppercase
+        active_macs = {mac.upper() for mac in coordinator.data}
             
         new_macs = active_macs - tracked_macs
         if not new_macs:
@@ -71,16 +77,16 @@ async def async_setup_entry(
 
         entities = []
         for mac in new_macs:
+            upper_mac = mac.upper()
             enabled_by_default = track_new_devices
-            entities.append(FGWScannerEntity(coordinator, mac, enabled_by_default))
-            tracked_macs.add(mac)
+            entities.append(FGWScannerEntity(coordinator, upper_mac, enabled_by_default))
+            tracked_macs.add(upper_mac)
 
         async_add_entities(entities)
 
     @callback
     def async_update_options(change_entry: ConfigEntry) -> None:
         """Update options dynamically when modified by user in frontend panels."""
-        # Fixed signature: Home Assistant update listeners pass EXACTLY ONE parameter (the updated config entry)
         new_interval = change_entry.options.get(CONF_SCAN_INTERVAL, change_entry.data.get(CONF_SCAN_INTERVAL, 60))
         coordinator.update_interval = timedelta(seconds=new_interval)
         _LOGGER.debug("DataUpdateCoordinator interval dynamically updated to %s seconds", new_interval)
@@ -101,10 +107,17 @@ class FGWScannerEntity(ScannerEntity):
     def __init__(self, coordinator: DataUpdateCoordinator, mac: str, enabled_by_default: bool = True) -> None:
         """Initialize the tracker entity."""
         self.coordinator = coordinator
-        self._mac = mac
-        self._attr_unique_id = f"fgw_{mac.replace(':', '').replace('-', '').lower()}"
-        self._attr_name = f"Device {mac}"
+        # Enforce casing consistency during entity initialization
+        self._mac = mac.upper()
+        self._attr_unique_id = f"fgw_{self._mac.replace(':', '').replace('-', '').lower()}"
+        self._attr_name = f"Device {self._mac}"
         self._attr_entity_registry_enabled_default = enabled_by_default
+
+    @property
+    def available(self) -> bool:
+        """Return True if the entity is available to process state updates."""
+        # The entity is safe to map states as long as the router communication loop is healthy
+        return self.coordinator.last_update_success
 
     @property
     def source_type(self) -> SourceType:
@@ -119,8 +132,15 @@ class FGWScannerEntity(ScannerEntity):
     @property
     def is_connected(self) -> bool:
         """Return true if the device is currently active on the router."""
+        if not self.coordinator.data:
+            return False
         return self._mac in self.coordinator.data
 
     async def async_added_to_hass(self) -> None:
-        """Subscribe to coordinator updates."""
-        self.async_on_remove(self.coordinator.async_add_listener(self.async_write_ha_state))
+        """Subscribe to coordinator updates safely."""
+        @callback
+        def async_update_state() -> None:
+            """Write state safely during coordinator refresh intervals."""
+            self.async_write_ha_state()
+
+        self.async_on_remove(self.coordinator.async_add_listener(async_update_state))
