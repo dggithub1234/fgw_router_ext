@@ -16,9 +16,7 @@ from homeassistant.const import (
     CONF_USERNAME,
 )
 
-# Import your custom parameters locally from your local file
 from .const import CONF_TRACK_NEW_DEVICES, CONF_SCAN_INTERVAL
-
 from .router import fetch_fgw_data
 
 _LOGGER = logging.getLogger(__name__)
@@ -36,7 +34,6 @@ async def async_setup_entry(
     username = entry.data[CONF_USERNAME]
     password = entry.data[CONF_PASSWORD]
     
-    # Read configuration from options first, falling back to initial data
     scan_interval = entry.options.get(CONF_SCAN_INTERVAL, entry.data.get(CONF_SCAN_INTERVAL, 60))
     
     async def async_update_router_data() -> set[str]:
@@ -70,7 +67,6 @@ async def async_setup_entry(
         if not new_macs:
             return
 
-        # Always read this live from options so it catches changes instantly mid-run
         track_new_devices = entry.options.get(CONF_TRACK_NEW_DEVICES, entry.data.get(CONF_TRACK_NEW_DEVICES, True))
 
         entities = []
@@ -81,8 +77,18 @@ async def async_setup_entry(
 
         async_add_entities(entities)
 
-    # Listen for coordinator updates to discover newly added hardware
+    @callback
+    def async_update_options(change_entry: ConfigEntry) -> None:
+        """Update options dynamically when modified by user in frontend panels."""
+        # Fixed signature: Home Assistant update listeners pass EXACTLY ONE parameter (the updated config entry)
+        new_interval = change_entry.options.get(CONF_SCAN_INTERVAL, change_entry.data.get(CONF_SCAN_INTERVAL, 60))
+        coordinator.update_interval = timedelta(seconds=new_interval)
+        _LOGGER.debug("DataUpdateCoordinator interval dynamically updated to %s seconds", new_interval)
+
+    # Correct listener attachment hooks
+    entry.async_on_unload(entry.add_update_listener(async_update_options))
     entry.async_on_unload(coordinator.async_add_listener(async_discover_devices))
+    
     async_discover_devices()
 
 
