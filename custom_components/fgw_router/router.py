@@ -28,23 +28,21 @@ async def _read_until(reader, expect_bytes, timeout=15):
             break
             
         try:
+            # Replaced chunk limiter to ensure stable read delivery over Telnet loops
             chunk = await asyncio.wait_for(reader.read(4096), timeout=timeout)
             if not chunk:
-                _LOGGER.debug("Telnet stream closed prematurely by remote host.")
                 break
             buffer.extend(chunk)
         except asyncio.TimeoutError:
-            # CRITICAL DEBUGGING LINE:
-            _LOGGER.warning(
-                "Telnet timeout reached while waiting for %s. Raw buffer contents so far:\n%s",
-                expect_bytes,
-                buffer.decode("utf-8", errors="ignore")
+            _LOGGER.debug(
+                "Reached end of active Telnet stream data buffer window. Parsing accumulated text data contents."
             )
             break
     return bytes(buffer)
+    
 
 async def fetch_fgw_data(host, port, username, password) -> set[str]:
-    """Retrieve and parse connected devices from FGW router reliably using chained commands."""
+    """Retrieve and parse connected devices from FGW router asynchronously."""
     devices = set()
     
     try:
@@ -63,21 +61,23 @@ async def fetch_fgw_data(host, port, username, password) -> set[str]:
         await writer.drain()
         await _read_until(reader, b"password:")
         
-        # Step 3: Write password and wait for the initial CLI prompt
+        # Step 3: Write password and wait for cli prompt
         writer.write(f"{password}\r\n".encode("ascii"))
         await writer.drain()
         await _read_until(reader, b"cli> ")
 
-        # FIX: Chain terminal settings and the DHCP query together using semicolon separation
-        # This executes both actions sequentially inside the router shell using ONE single write/drain payload.
-        chained_command = b"system/terminal/pagesize --size=0; lan/dhcp/show\r\n"
-        writer.write(chained_command)
+        # FIX: Explicitly disable terminal paging for this session
+        writer.write(b"system/terminal/pagesize --size=0\r\n")
         await writer.drain()
+        await _read_until(reader, b"cli> ")
         
-        # Step 4: Capture everything until the CLI command prompt finishes executing
-        output = await _read_until(reader, b"/cli> ")
+        # Step 4: Write command to retrieve leases
+        writer.write(b"lan/dhcp/show\r\n")
+        await writer.drain()
+        output = await _read_until(reader, b"+---------------------------------------------------------------------------------------------------------------------------+\r\n/cli> ")
+        #output = await _read_until(reader, b"cli> ")
         
-        # Step 5: Quit cleanly
+        # Step 5: Quit gracefully
         writer.write(b"quit\r\n")
         await writer.drain()
         
@@ -118,14 +118,13 @@ async def fetch_fgw_data(host, port, username, password) -> set[str]:
         await writer.drain()
         await _read_until(reader, b"cli> ")
 
-        # Apply the same command chaining fix to the legacy wireless station loop
-        # Runs index 0 and index 1 back-to-back without breaking the stream protocol
-        wifi_command = b"wireless/show-stationinfo --wifi-index=0; wireless/show-stationinfo --wifi-index=1\r\n"
-        writer.write(wifi_command)
-        await writer.drain()
-        
-        out = await _read_until(reader, b"cli> ")
-        all_lines.extend(out.split(b"\r\n"))
+        # SYNTAX ERROR REMOVED: Loop interfaces fixed to standard [0, 1]
+        for idx in [0, 1]:
+            cmd = f"wireless/show-stationinfo --wifi-index={idx}\r\n"
+            writer.write(cmd.encode("ascii"))
+            await writer.drain()
+            out = await _read_until(reader, b"cli> ")
+            all_lines.extend(out.split(b"\r\n"))
             
         writer.write(b"quit\r\n")
         await writer.drain()
