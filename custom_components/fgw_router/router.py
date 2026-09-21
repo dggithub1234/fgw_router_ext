@@ -11,8 +11,7 @@ _DHCP_REGEX = re.compile(
     re.IGNORECASE,
 )
 
-_WIFI_REGEX = re.compile(r"(?P<mac>([0-9A-F]{2}[:-]){5}[0-9A-F]{2})\s*\|\s*(Yes|Active|1)", re.IGNORECASE)
-
+_WIFI_REGEX = re.compile(r"(?P<mac>([0-9A-F]{2}[:-]){5}[0-9A-F]{2})\s*\|\s*Yes", re.IGNORECASE)
 
 async def _read_until(reader, expect_bytes, timeout=30):
     """Helper to strictly read from stream until expected sequence is hit (case-insensitive)."""
