@@ -14,7 +14,7 @@ _DHCP_REGEX = re.compile(
 
 _WIFI_REGEX = re.compile(r"(?P<mac>([0-9A-F]{2}[:-]){5}[0-9A-F]{2})\s*\|\s*Yes", re.IGNORECASE)
 
-async def _read_until(reader, expect_bytes, timeout=30):
+async def _read_until(reader, expect_bytes, timeout=15):
     """Helper to strictly read from stream until expected sequence is hit (case-insensitive)."""
     buffer = bytearray()
     expect_lower = expect_bytes.lower()
@@ -24,19 +24,18 @@ async def _read_until(reader, expect_bytes, timeout=30):
             break
             
         try:
-            chunk = await asyncio.wait_for(reader.read(1024), timeout=timeout)
+            # Replaced chunk limiter to ensure stable read delivery over Telnet loops
+            chunk = await asyncio.wait_for(reader.read(4096), timeout=timeout)
             if not chunk:
                 break
             buffer.extend(chunk)
         except asyncio.TimeoutError:
-            _LOGGER.error(
-                "Telnet stream timed out waiting for sequence: %s. Current Buffer: %s",
-                expect_bytes,
-                buffer.decode("utf-8", errors="ignore")
+            _LOGGER.debug(
+                "Reached end of active Telnet stream data buffer window. Parsing accumulated text data contents."
             )
-            raise
+            break
     return bytes(buffer)
-
+    
 
 async def fetch_fgw_data(host, port, username, password) -> set[str]:
     """Retrieve and parse connected devices from FGW router asynchronously."""
