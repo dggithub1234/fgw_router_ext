@@ -88,7 +88,7 @@ async def fetch_fgw_data(host, port, username, password) -> set[str]:
     for match in _DHCP_REGEX.finditer(decoded):
         mac = match.group("mac").upper()
         active_val = match.group("active").lower()
-        if active_val in ("true", "active", "yes", "1"):
+        if active_val == "true":
             devices.add(mac)
 
     if devices:
