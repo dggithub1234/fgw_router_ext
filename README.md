@@ -33,10 +33,9 @@ Restart so the changes can take place.
     (If you haven't changed the default credentials, these are the default ones)
     username: meo
     password: meo
-    scan interval: 60s
-    track new devices (if deselected they are added but disabled)
 
-You can change setup at a later date using the settings option (the cog symbol)
+Scan interval is set to 120s and new devices are set to disabled.
+To change this edit the const.py file in the \config\custom_components\fgw_router_et\ directory and reload the integration.
 
 #### Devices:
 Trackers are automatically added and can be renamed in the UI.
