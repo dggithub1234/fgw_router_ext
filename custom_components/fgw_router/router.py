@@ -58,32 +58,38 @@ async def fetch_fgw_data(host, port, username, password) -> set[str]:
     try:
         # Step 1: Wait for login prompt
         await _read_until(reader, b"login:")
+        await asyncio.sleep(0.2)
         
         # Step 2: Write username and wait for password prompt
         writer.write(f"{username}\r\n".encode("ascii"))
         await writer.drain()
         await _read_until(reader, b"password:")
+        await asyncio.sleep(0.2)
         
         # Step 3: Write password and wait for cli prompt
         writer.write(f"{password}\r\n".encode("ascii"))
         await writer.drain()
         await _read_until(reader, b"cli> ")
-
+        await asyncio.sleep(0.2)
+        
         # FIX: Explicitly disable terminal paging for this session
         writer.write(b"system/terminal/pagesize --size=0\r\n")
         await writer.drain()
         await _read_until(reader, b"cli> ")
+        await asyncio.sleep(0.2)
         
         # Step 4: Write command to retrieve leases
         writer.write(b"lan/dhcp/show\r\n")
         await writer.drain()
         #output = await _read_until(reader, b"+---------------------------------------------------------------------------------------------------------------------------+\r\n/cli> ")
         output = await _read_until(reader, b"/cli> ")
+        await asyncio.sleep(0.2)
         
         # Step 5: Quit gracefully
         writer.write(b"quit\r\n")
         await writer.drain()
-        
+        await asyncio.sleep(0.5)
+    
     except Exception as err:
         _LOGGER.exception("Telnet execution broke during router conversation exchange: %s", err)
         return devices
