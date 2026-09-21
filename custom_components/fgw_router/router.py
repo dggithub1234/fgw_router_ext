@@ -65,7 +65,8 @@ async def fetch_fgw_data(host, port, username, password) -> set[str]:
         # Step 4: Write command to retrieve leases
         writer.write(b"lan/dhcp/show\r\n")
         await writer.drain()
-        output = await _read_until(reader, b"cli> ")
+        output = await _read_until(reader, b"+---/\r\ncli> ")
+        #output = await _read_until(reader, b"cli> ")
         
         # Step 5: Quit gracefully
         writer.write(b"quit\r\n")
