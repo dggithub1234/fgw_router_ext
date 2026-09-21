@@ -8,9 +8,13 @@ _LOGGER = logging.getLogger(__name__)
 # Updated to gracefully bypass the IP and expiration columns used by newer FGW firmwares
 
 _DHCP_REGEX = re.compile(
-    r"\|\s*(?P<mac>([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2})\s*\|[^\|]+\|[^\|]+\|\s*(?P<port>[a-z0-9\._\-]+)\s*\|\s*(?P<active>true|false)",
-    re.IGNORECASE,
+    r"\|\s*[^\|]*\s*\|\s*(?P<mac>([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2})\s*\|\s*[^\|]+\s*\|\s*[^\|]+\s*\|\s*(?P<port>[a-z0-9\._\-]+)\s*\|\s*(?P<active>TRUE|FALSE|true|false)",
 )
+
+#_DHCP_REGEX = re.compile(
+#    r"\|\s*(?P<mac>([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2})\s*\|[^\|]+\|[^\|]+\|\s*(?P<port>[a-z0-9\._\-]+)\s*\|\s*(?P<active>true|false)",
+#    re.IGNORECASE,
+#)
 
 _WIFI_REGEX = re.compile(r"(?P<mac>([0-9A-F]{2}[:-]){5}[0-9A-F]{2})\s*\|\s*Yes", re.IGNORECASE)
 
@@ -70,7 +74,7 @@ async def fetch_fgw_data(host, port, username, password) -> set[str]:
         # Step 4: Write command to retrieve leases
         writer.write(b"lan/dhcp/show\r\n")
         await writer.drain()
-        output = await _read_until(reader, b"+---/\r\ncli> ")
+        output = await _read_until(reader, b"+---------------------------------------------------------------------------------------------------------------------------+\r\n/cli> ")
         #output = await _read_until(reader, b"cli> ")
         
         # Step 5: Quit gracefully
