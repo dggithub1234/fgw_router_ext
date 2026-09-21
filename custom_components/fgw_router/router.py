@@ -1,22 +1,16 @@
-"""Raw Telnet connection client for Altice / MEO FiberGateway."""
+"""Raw Telnet connection client for Altice / MEO FiberGateway with auto-retry logic."""
 
 import asyncio
 import logging
 import re
 
 _LOGGER = logging.getLogger(__name__)
-# Updated to gracefully bypass the IP and expiration columns used by newer FGW firmwares
 
+# Pattern configured to match MAC and Active state ignoring IP and Expiration columns
 _DHCP_REGEX = re.compile(
     r"\|\s*[^\|]*\s*\|\s*(?P<mac>([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2})\s*\|\s*[^\|]+\s*\|\s*[^\|]+\s*\|\s*(?P<port>[a-z0-9\._\-]+)\s*\|\s*(?P<active>TRUE|FALSE|true|false)",
 )
 
-#_DHCP_REGEX = re.compile(
-#    r"\|\s*(?P<mac>([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2})\s*\|[^\|]+\|[^\|]+\|\s*(?P<port>[a-z0-9\._\-]+)\s*\|\s*(?P<active>true|false)",
-#    re.IGNORECASE,
-#)
-
-_WIFI_REGEX = re.compile(r"(?P<mac>([0-9A-F]{2}[:-]){5}[0-9A-F]{2})\s*\|\s*Yes", re.IGNORECASE)
 
 async def _read_until(reader, expect_bytes, timeout=15):
     """Helper to strictly read from stream until expected sequence is hit (case-insensitive)."""
@@ -34,7 +28,6 @@ async def _read_until(reader, expect_bytes, timeout=15):
                 break
             buffer.extend(chunk)
         except asyncio.TimeoutError:
-            # CRITICAL DEBUGGING LINE:
             _LOGGER.warning(
                 "Telnet timeout reached while waiting for %s. Raw buffer contents so far:\n%s",
                 expect_bytes,
@@ -42,37 +35,31 @@ async def _read_until(reader, expect_bytes, timeout=15):
             )
             break
     return bytes(buffer)
-    
 
-async def fetch_fgw_data(host, port, username, password) -> set[str]:
-    """Retrieve and parse connected devices from FGW router asynchronously."""
-    devices = set()
-    
-    try:
-        connect = asyncio.open_connection(host, port)
-        reader, writer = await asyncio.wait_for(connect, timeout=15)
-    except Exception as err:
-        _LOGGER.error("Unable to open TCP connection to FiberGateway at %s:%s - %s", host, port, err)
-        return devices
+
+async def _execute_dhcp_fetch(host, port, username, password) -> bytes | None:
+    """Helper representing a single conversation sequence to fetch DHCP leases."""
+    connect = asyncio.open_connection(host, port)
+    reader, writer = await asyncio.wait_for(connect, timeout=15)
 
     try:
         # Step 1: Wait for login prompt
         await _read_until(reader, b"login:")
-        await asyncio.sleep(0.2)
+        await asyncio.sleep(0.2)  # Pacing pause
         
         # Step 2: Write username and wait for password prompt
         writer.write(f"{username}\r\n".encode("ascii"))
         await writer.drain()
         await _read_until(reader, b"password:")
-        await asyncio.sleep(0.2)
+        await asyncio.sleep(0.2)  # Pacing pause
         
         # Step 3: Write password and wait for cli prompt
         writer.write(f"{password}\r\n".encode("ascii"))
         await writer.drain()
         await _read_until(reader, b"cli> ")
         await asyncio.sleep(0.2)
-        
-        # FIX: Explicitly disable terminal paging for this session
+
+        # Explicitly disable terminal paging for this session
         writer.write(b"system/terminal/pagesize --size=0\r\n")
         await writer.drain()
         await _read_until(reader, b"cli> ")
@@ -81,18 +68,15 @@ async def fetch_fgw_data(host, port, username, password) -> set[str]:
         # Step 4: Write command to retrieve leases
         writer.write(b"lan/dhcp/show\r\n")
         await writer.drain()
-        #output = await _read_until(reader, b"+---------------------------------------------------------------------------------------------------------------------------+\r\n/cli> ")
         output = await _read_until(reader, b"/cli> ")
         await asyncio.sleep(0.2)
         
         # Step 5: Quit gracefully
         writer.write(b"quit\r\n")
         await writer.drain()
-        await asyncio.sleep(0.5)
-    
-    except Exception as err:
-        _LOGGER.exception("Telnet execution broke during router conversation exchange: %s", err)
-        return devices
+        await asyncio.sleep(0.4)  # Allow the router time to process session exit
+        return output
+        
     finally:
         try:
             writer.close()
@@ -100,56 +84,36 @@ async def fetch_fgw_data(host, port, username, password) -> set[str]:
         except Exception:
             pass
 
-    decoded = output.decode("utf-8", errors="ignore")
-    _LOGGER.debug("Parsed Data Table Response: %s", decoded)
 
-    for match in _DHCP_REGEX.finditer(decoded):
-        mac = match.group("mac").upper()
-        active_val = match.group("active").lower()
-        if active_val == "true":
-            devices.add(mac)
+async def fetch_fgw_data(host, port, username, password) -> set[str]:
+    """Retrieve and parse connected devices from FGW router with fallback retry loop."""
+    devices = set()
+    output = None
+    max_attempts = 3
 
-    if devices:
-        return devices
-
-    _LOGGER.warning("DHCP table empty, dropping into legacy wifi station check.")
-    all_lines = []
-    try:
-        connect = asyncio.open_connection(host, port)
-        reader, writer = await asyncio.wait_for(connect, timeout=15)
-        
-        await _read_until(reader, b"login:")
-        writer.write(f"{username}\r\n".encode("ascii"))
-        await writer.drain()
-        
-        await _read_until(reader, b"password:")
-        writer.write(f"{password}\r\n".encode("ascii"))
-        await writer.drain()
-        await _read_until(reader, b"cli> ")
-
-        # SYNTAX ERROR REMOVED: Loop interfaces fixed to standard [0, 1]
-        for idx in [0, 1]:
-            cmd = f"wireless/show-stationinfo --wifi-index={idx}\r\n"
-            writer.write(cmd.encode("ascii"))
-            await writer.drain()
-            out = await _read_until(reader, b"cli> ")
-            all_lines.extend(out.split(b"\r\n"))
-            
-        writer.write(b"quit\r\n")
-        await writer.drain()
-    except Exception as err:
-        _LOGGER.error("Fallback wireless communication failed: %s", err)
-        return devices
-    finally:
+    # Primary Try Loop for DHCP Table
+    for attempt in range(1, max_attempts + 1):
         try:
-            writer.close()
-            await writer.wait_closed()
-        except Exception:
-            pass
+            _LOGGER.debug("Fetching FGW DHCP leases - Attempt %d of %d", attempt, max_attempts)
+            output = await _execute_dhcp_fetch(host, port, username, password)
+            if output:
+                break
+        except Exception as err:
+            _LOGGER.debug("Telnet session tracking dropped on attempt %d: %s", attempt, err)
+            if attempt < max_attempts:
+                # Cool down to let the router reset its internal connection state table
+                await asyncio.sleep(1.5)
+            else:
+                _LOGGER.warning("All %d DHCP fetch attempts failed due to connection drops.", max_attempts)
 
-    for line in all_lines:
-        match = _WIFI_REGEX.search(line.decode("utf-8", errors="ignore"))
-        if match:
-            devices.add(match.group("mac").upper())
+    if output:
+        decoded = output.decode("utf-8", errors="ignore")
+        _LOGGER.debug("Parsed Data Table Response: %s", decoded)
+
+        for match in _DHCP_REGEX.finditer(decoded):
+            mac = match.group("mac").upper()
+            active_val = match.group("active").lower()
+            if active_val == "true":
+                devices.add(mac)
 
     return devices
