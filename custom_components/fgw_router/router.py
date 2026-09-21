@@ -83,7 +83,7 @@ async def fetch_fgw_data(host, port, username, password) -> set[str]:
     """Retrieve and parse connected devices from FGW router with fallback retry loop."""
     devices = set()
     output = None
-    max_attempts = 3
+    max_attempts = 5
 
     # Primary Try Loop for DHCP Table
     for attempt in range(1, max_attempts + 1):
