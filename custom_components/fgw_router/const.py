@@ -2,8 +2,6 @@
 
 DOMAIN = "fgw_router_ext"
 
-# Custom device tracker options key
-CONF_TRACK_NEW_DEVICES = "track_new_devices"
-
-# Add your local scan interval definition here to avoid Home Assistant Core deprecation errors
-CONF_SCAN_INTERVAL = "scan_interval"
+# Hardcoded Options - Edit these manually and restart Home Assistant
+HARDCODED_SCAN_INTERVAL = 120       # Time in seconds between router scans
+HARDCODED_TRACK_NEW_DEVICES = False  # True to automatically enable new devices, False to keep them disabled
