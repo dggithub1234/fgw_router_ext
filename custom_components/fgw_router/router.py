@@ -28,18 +28,20 @@ async def _read_until(reader, expect_bytes, timeout=15):
             break
             
         try:
-            # Replaced chunk limiter to ensure stable read delivery over Telnet loops
             chunk = await asyncio.wait_for(reader.read(4096), timeout=timeout)
             if not chunk:
+                _LOGGER.debug("Telnet stream closed prematurely by remote host.")
                 break
             buffer.extend(chunk)
         except asyncio.TimeoutError:
-            _LOGGER.debug(
-                "Reached end of active Telnet stream data buffer window. Parsing accumulated text data contents."
+            # CRITICAL DEBUGGING LINE:
+            _LOGGER.warning(
+                "Telnet timeout reached while waiting for %s. Raw buffer contents so far:\n%s",
+                expect_bytes,
+                buffer.decode("utf-8", errors="ignore")
             )
             break
     return bytes(buffer)
-    
 
 async def fetch_fgw_data(host, port, username, password) -> set[str]:
     """Retrieve and parse connected devices from FGW router asynchronously."""
@@ -74,7 +76,7 @@ async def fetch_fgw_data(host, port, username, password) -> set[str]:
         # Step 4: Write command to retrieve leases
         writer.write(b"lan/dhcp/show\r\n")
         await writer.drain()
-        output = await _read_until(reader, b"/cli> ")
+        output = await _read_until(reader, b"cli> ")
         
         # Step 5: Quit gracefully
         writer.write(b"quit\r\n")
