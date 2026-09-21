@@ -62,6 +62,11 @@ async def fetch_fgw_data(host, port, username, password) -> set[str]:
         await writer.drain()
         await _read_until(reader, b"cli> ")
 
+        # FIX: Explicitly disable terminal paging for this session
+        writer.write(b"system/terminal/pagesize --size=0\r\n")
+        await writer.drain()
+        await _read_until(reader, b"cli> ")
+        
         # Step 4: Write command to retrieve leases
         writer.write(b"lan/dhcp/show\r\n")
         await writer.drain()
