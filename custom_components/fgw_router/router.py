@@ -25,7 +25,8 @@ async def _read_until(reader, expect_bytes, timeout=15):
             chunk = await asyncio.wait_for(reader.read(4096), timeout=timeout)
             if not chunk:
                 _LOGGER.debug("Telnet stream closed prematurely by remote host.")
-                break
+                # RAISE EXCEPTION: Force the retry loop to acknowledge the drop
+                raise ConnectionError("Telnet connection lost before expected prompt was found.")
             buffer.extend(chunk)
         except asyncio.TimeoutError:
             _LOGGER.warning(
@@ -33,7 +34,7 @@ async def _read_until(reader, expect_bytes, timeout=15):
                 expect_bytes,
                 buffer.decode("utf-8", errors="ignore")
             )
-            break
+            raise ConnectionError("Timeout waiting for router terminal prompt.")
     return bytes(buffer)
 
 
@@ -45,36 +46,30 @@ async def _execute_dhcp_fetch(host, port, username, password) -> bytes | None:
     try:
         # Step 1: Wait for login prompt
         await _read_until(reader, b"login:")
-        await asyncio.sleep(0.2)  # Pacing pause
         
         # Step 2: Write username and wait for password prompt
         writer.write(f"{username}\r\n".encode("ascii"))
         await writer.drain()
         await _read_until(reader, b"password:")
-        await asyncio.sleep(0.2)  # Pacing pause
         
         # Step 3: Write password and wait for cli prompt
         writer.write(f"{password}\r\n".encode("ascii"))
         await writer.drain()
         await _read_until(reader, b"cli> ")
-        await asyncio.sleep(0.2)
 
         # Explicitly disable terminal paging for this session
         writer.write(b"system/terminal/pagesize --size=0\r\n")
         await writer.drain()
         await _read_until(reader, b"cli> ")
-        await asyncio.sleep(0.2)
         
         # Step 4: Write command to retrieve leases
         writer.write(b"lan/dhcp/show\r\n")
         await writer.drain()
         output = await _read_until(reader, b"/cli> ")
-        await asyncio.sleep(0.2)
         
         # Step 5: Quit gracefully
         writer.write(b"quit\r\n")
         await writer.drain()
-        await asyncio.sleep(0.4)  # Allow the router time to process session exit
         return output
         
     finally:
@@ -83,7 +78,6 @@ async def _execute_dhcp_fetch(host, port, username, password) -> bytes | None:
             await writer.wait_closed()
         except Exception:
             pass
-
 
 async def fetch_fgw_data(host, port, username, password) -> set[str]:
     """Retrieve and parse connected devices from FGW router with fallback retry loop."""
