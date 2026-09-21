@@ -5,9 +5,10 @@ import logging
 import re
 
 _LOGGER = logging.getLogger(__name__)
+# Updated to gracefully bypass the IP and expiration columns used by newer FGW firmwares
 
 _DHCP_REGEX = re.compile(
-    r"(?P<mac>([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}).*?\|\s*(?P<port>[a-z0-9\.]+)\s*\|\s*(?P<active>true|false)",
+    r"\|\s*(?P<mac>([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2})\s*\|[^\|]+\|[^\|]+\|\s*(?P<port>[a-z0-9\._\-]+)\s*\|\s*(?P<active>true|false)",
     re.IGNORECASE,
 )
 
