@@ -83,7 +83,6 @@ async def async_setup_entry(
     
     async_discover_devices()
 
-
 class FGWScannerEntity(ScannerEntity):
     """Representation of a device tracked via the modern FiberGateway integration."""
 
@@ -100,8 +99,12 @@ class FGWScannerEntity(ScannerEntity):
 
     @property
     def available(self) -> bool:
-        """Return True if the entity is available to process state updates."""
-        return self.coordinator.last_update_success
+        """Always stay available as long as the parent integration entry exists.
+        
+        This prevents an away phone from flipping to 'Unavailable' if the router 
+        drops a single packet or clears the device from its active cache.
+        """
+        return True
 
     @property
     def source_type(self) -> SourceType:
@@ -116,7 +119,8 @@ class FGWScannerEntity(ScannerEntity):
     @property
     def is_connected(self) -> bool:
         """Return true if the device is currently active on the router."""
-        if not self.coordinator.data:
+        # If the coordinator fails or table is missing, safely assume away rather than breaking
+        if not self.coordinator.last_update_success or not self.coordinator.data:
             return False
         return self._mac in self.coordinator.data
 
@@ -128,3 +132,4 @@ class FGWScannerEntity(ScannerEntity):
             self.async_write_ha_state()
 
         self.async_on_remove(self.coordinator.async_add_listener(async_update_state))
+
