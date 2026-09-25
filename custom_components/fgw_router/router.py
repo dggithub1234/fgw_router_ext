@@ -96,7 +96,7 @@ async def fetch_fgw_data(host, port, username, password) -> set[str]:
             _LOGGER.debug("Telnet session tracking dropped on attempt %d: %s", attempt, err)
             if attempt < max_attempts:
                 # Cool down to let the router reset its internal connection state table
-                await asyncio.sleep(1.5)
+                await asyncio.sleep(3)
             else:
                 _LOGGER.warning("All %d DHCP fetch attempts failed due to connection drops.", max_attempts)
 
