@@ -56,19 +56,14 @@ async def async_setup_entry(
 
     await coordinator.async_config_entry_first_refresh()
 
-    # 1. Initialize memory from Home Assistant's Entity Registry
-    # This prevents HA from thinking an offline device has been deleted by the code.
+    # 1. Initialize persistent memory using Home Assistant's Entity Registry
     tracked_macs: set[str] = set()
     ent_reg = er.async_get(hass)
     
     for entity in er.async_entries_for_config_entry(ent_reg, entry.entry_id):
-        # Infer the MAC from the unique_id if we previously stripped it
-        # Format used: fgw_aabbccddeeff. We extract the aabbccddeeff part.
-        if entity.unique_id.startswith("fgw_"):
-            raw_mac = entity.unique_id.split("_")[1]
-            # Convert back to colon format (AA:BB:CC:DD:EE:FF) for tracking consistency
-            mac_with_colons = ":".join(raw_mac[i:i+2].upper() for i in range(0, len(raw_mac), 2))
-            tracked_macs.add(mac_with_colons)
+        # Read the raw unique_id stored directly as "E8:C3:86:A6:65:D7"
+        if entity.unique_id and ":" in entity.unique_id:
+            tracked_macs.add(entity.unique_id.upper())
 
     @callback
     def async_discover_devices() -> None:
@@ -92,6 +87,17 @@ async def async_setup_entry(
             async_add_entities(entities)
 
     entry.async_on_unload(coordinator.async_add_listener(async_discover_devices))
+    
+    # 2. Immediately spin up ALL previously tracked entities, offline or online
+    if tracked_macs:
+        initial_entities = [
+            FGWScannerEntity(coordinator, mac, HARDCODED_TRACK_NEW_DEVICES) 
+            for mac in tracked_macs
+        ]
+        async_add_entities(initial_entities)
+
+    # 3. Discover any completely new devices that just hit the network loop
+    async_discover_devices()
     
     # 2. Re-instantiate entities for ALL historical tracked macs on load, 
     # even if they are currently absent from the active router DHCP loop.
