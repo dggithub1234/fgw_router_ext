@@ -15,6 +15,7 @@ from homeassistant.const import (
     CONF_PASSWORD, 
     CONF_USERNAME,
 )
+from homeassistant.helpers import entity_registry as er
 
 # Import the new hardcoded variables directly from const.py
 from .const import HARDCODED_SCAN_INTERVAL, HARDCODED_TRACK_NEW_DEVICES
@@ -50,12 +51,24 @@ async def async_setup_entry(
         _LOGGER,
         name=f"FGW Router Tracker {host}",
         update_method=async_update_router_data,
-        # Strictly use your file-defined scan interval
         update_interval=timedelta(seconds=HARDCODED_SCAN_INTERVAL),
     )
 
     await coordinator.async_config_entry_first_refresh()
+
+    # 1. Initialize memory from Home Assistant's Entity Registry
+    # This prevents HA from thinking an offline device has been deleted by the code.
     tracked_macs: set[str] = set()
+    ent_reg = er.async_get(hass)
+    
+    for entity in er.async_entries_for_config_entry(ent_reg, entry.entry_id):
+        # Infer the MAC from the unique_id if we previously stripped it
+        # Format used: fgw_aabbccddeeff. We extract the aabbccddeeff part.
+        if entity.unique_id.startswith("fgw_"):
+            raw_mac = entity.unique_id.split("_")[1]
+            # Convert back to colon format (AA:BB:CC:DD:EE:FF) for tracking consistency
+            mac_with_colons = ":".join(raw_mac[i:i+2].upper() for i in range(0, len(raw_mac), 2))
+            tracked_macs.add(mac_with_colons)
 
     @callback
     def async_discover_devices() -> None:
@@ -71,16 +84,25 @@ async def async_setup_entry(
         entities = []
         for mac in new_macs:
             upper_mac = mac.upper()
-            # Dynamic settings check removed; relies strictly on file constant
             enabled_by_default = HARDCODED_TRACK_NEW_DEVICES
             entities.append(FGWScannerEntity(coordinator, upper_mac, enabled_by_default))
             tracked_macs.add(upper_mac)
 
-        async_add_entities(entities)
+        if entities:
+            async_add_entities(entities)
 
-    # Listeners removed since we no longer respond to live options modifications
     entry.async_on_unload(coordinator.async_add_listener(async_discover_devices))
     
+    # 2. Re-instantiate entities for ALL historical tracked macs on load, 
+    # even if they are currently absent from the active router DHCP loop.
+    if tracked_macs:
+        initial_entities = [
+            FGWScannerEntity(coordinator, mac, HARDCODED_TRACK_NEW_DEVICES) 
+            for mac in tracked_macs
+        ]
+        async_add_entities(initial_entities)
+
+    # 3. Check if there are brand new active devices to append right now
     async_discover_devices()
 
 
