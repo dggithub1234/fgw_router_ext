@@ -2,6 +2,7 @@
 
 import asyncio
 from datetime import timedelta
+import os
 import logging
 
 from homeassistant.components.device_tracker import ScannerEntity, SourceType
@@ -17,11 +18,30 @@ from homeassistant.const import (
 )
 from homeassistant.helpers import entity_registry as er
 
-# Import the new hardcoded variables directly from const.py
 from .const import HARDCODED_SCAN_INTERVAL, HARDCODED_TRACK_NEW_DEVICES
 from .router import fetch_fgw_data
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def load_manual_macs(config_dir: str) -> dict[str, str]:
+    """Synchronous helper to read manual MAC mapping file."""
+    file_path = os.path.join(config_dir, "manual_macs.txt")
+    mapping = {}
+    if not os.path.exists(file_path):
+        return mapping
+        
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            for line in f:
+                cleaned = line.strip()
+                if not cleaned or cleaned.startswith("#") or "=" not in cleaned:
+                    continue
+                mac, name = cleaned.split("=", 1)
+                mapping[mac.strip().upper()] = name.strip()
+    except Exception as err:
+        _LOGGER.error("Error reading manual_macs.txt: %s", err)
+    return mapping
 
 
 async def async_setup_entry(
@@ -35,6 +55,10 @@ async def async_setup_entry(
     port = entry.data[CONF_PORT]
     username = entry.data[CONF_USERNAME]
     password = entry.data[CONF_PASSWORD]
+    
+    # Load manual MAC mappings from file path asynchronously
+    current_dir = os.path.dirname(__file__)
+    manual_mappings = await hass.async_add_executor_job(load_manual_macs, current_dir)
     
     async def async_update_router_data() -> set[str]:
         try:
@@ -56,14 +80,18 @@ async def async_setup_entry(
 
     await coordinator.async_config_entry_first_refresh()
 
-    # 1. Initialize persistent memory using Home Assistant's Entity Registry
+    # Initialize persistent memory using Home Assistant's Entity Registry
     tracked_macs: set[str] = set()
     ent_reg = er.async_get(hass)
     
     for entity in er.async_entries_for_config_entry(ent_reg, entry.entry_id):
-        # Read the raw unique_id stored directly as "E8:C3:86:A6:65:D7"
         if entity.unique_id and ":" in entity.unique_id:
             tracked_macs.add(entity.unique_id.upper())
+
+    # Seed any manual MACs that Home Assistant hasn't historically tracked yet
+    for manual_mac in manual_mappings:
+        if manual_mac not in tracked_macs:
+            tracked_macs.add(manual_mac)
 
     @callback
     def async_discover_devices() -> None:
@@ -80,7 +108,8 @@ async def async_setup_entry(
         for mac in new_macs:
             upper_mac = mac.upper()
             enabled_by_default = HARDCODED_TRACK_NEW_DEVICES
-            entities.append(FGWScannerEntity(coordinator, upper_mac, enabled_by_default))
+            custom_name = manual_mappings.get(upper_mac)
+            entities.append(FGWScannerEntity(coordinator, upper_mac, enabled_by_default, custom_name))
             tracked_macs.add(upper_mac)
 
         if entities:
@@ -88,27 +117,15 @@ async def async_setup_entry(
 
     entry.async_on_unload(coordinator.async_add_listener(async_discover_devices))
     
-    # 2. Immediately spin up ALL previously tracked entities, offline or online
+    # Immediately spin up ALL historically tracked and manually seeded entities
     if tracked_macs:
         initial_entities = [
-            FGWScannerEntity(coordinator, mac, HARDCODED_TRACK_NEW_DEVICES) 
+            FGWScannerEntity(coordinator, mac, HARDCODED_TRACK_NEW_DEVICES, manual_mappings.get(mac)) 
             for mac in tracked_macs
         ]
         async_add_entities(initial_entities)
 
-    # 3. Discover any completely new devices that just hit the network loop
-    async_discover_devices()
-    
-    # 2. Re-instantiate entities for ALL historical tracked macs on load, 
-    # even if they are currently absent from the active router DHCP loop.
-    if tracked_macs:
-        initial_entities = [
-            FGWScannerEntity(coordinator, mac, HARDCODED_TRACK_NEW_DEVICES) 
-            for mac in tracked_macs
-        ]
-        async_add_entities(initial_entities)
-
-    # 3. Check if there are brand new active devices to append right now
+    # Discover any completely new active devices that just hit the network loop
     async_discover_devices()
 
 
@@ -118,12 +135,18 @@ class FGWScannerEntity(ScannerEntity):
     _attr_has_entity_name = True
     _attr_should_poll = False
 
-    def __init__(self, coordinator: DataUpdateCoordinator, mac: str, enabled_by_default: bool = True) -> None:
+    def __init__(self, coordinator: DataUpdateCoordinator, mac: str, enabled_by_default: bool = True, custom_name: str | None = None) -> None:
         """Initialize the tracker entity."""
         self.coordinator = coordinator
         self._mac = mac.upper()
         self._attr_unique_id = f"fgw_{self._mac.replace(':', '').replace('-', '').lower()}"
-        self._attr_name = f"Device {self._mac}"
+        
+        # Use custom name if provided in file, otherwise fallback to default string
+        if custom_name:
+            self._attr_name = custom_name
+        else:
+            self._attr_name = f"Device {self._mac}"
+            
         self._attr_entity_registry_enabled_default = enabled_by_default
 
     @property
