@@ -34,20 +34,14 @@ Restart so the changes can take place.
     username: meo
     password: meo
 
-Scan interval is set to 120s and new devices are set to disabled.
+Scan interval is set to 120s and new devices are set to appear as disabled.
 To change this edit the const.py file in the \config\custom_components\fgw_router_et\ directory and reload the integration.
+Note: This needs to be altered again after each update.
 
 #### Devices:
 Trackers are automatically added and can be renamed in the UI.
-
-You can also turn off automatic enabling of new devices in the UI as follows:
-    Go to Settings 
-    ➔ Devices & Services.
-    Find your Altice / MEO FiberGateway integration card.
-    Click the three vertical dots on the integration card.
-    Click System options.
-    Toggle OFF the setting that says "Enable newly added entities".
-    Click Save.
+You can force a list of macs/names by editing the manual_macs.txt file and placing it in the config folder.
+This is the best way to manage macs of interest and will stop infrequent macs from becoming unavailable (family members that visit ocassionally) 
 
 
 
