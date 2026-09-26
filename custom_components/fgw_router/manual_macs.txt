@@ -1,0 +1,7 @@
+# ==========================================
+# DEVICE STAGING LIST
+# Use 'MAC=Friendly Name' format below
+# ==========================================
+
+# This device is on hold - commented out so it won't be read:
+# 22:33:44:55:66:77=Temporary Guest Phone
