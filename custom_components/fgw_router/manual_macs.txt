@@ -1,6 +1,7 @@
 # ==========================================
 # DEVICE STAGING LIST
 # Use 'MAC=Friendly Name' format below
+# Edit this file and copy it to the config folder
 # ==========================================
 
 # This device is on hold - commented out so it won't be read:
