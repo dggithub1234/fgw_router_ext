@@ -43,7 +43,6 @@ def load_manual_macs(config_dir: str) -> dict[str, str]:
         _LOGGER.error("Error reading manual_macs.txt: %s", err)
     return mapping
 
-
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -56,9 +55,12 @@ async def async_setup_entry(
     username = entry.data[CONF_USERNAME]
     password = entry.data[CONF_PASSWORD]
     
-    # Load manual MAC mappings from file path asynchronously
-    current_dir = os.path.dirname(__file__)
-    manual_mappings = await hass.async_add_executor_job(load_manual_macs, current_dir)
+    # CHANGE THIS: Point to the root HA config folder instead of the integration folder
+    #current_dir = os.path.dirname(__file__)
+    #manual_mappings = await hass.async_add_executor_job(load_manual_macs, current_dir)
+    config_dir = hass.config.config_dir
+    manual_mappings = await hass.async_add_executor_job(load_manual_macs, config_dir)
+
     
     async def async_update_router_data() -> set[str]:
         try:
@@ -80,18 +82,12 @@ async def async_setup_entry(
 
     await coordinator.async_config_entry_first_refresh()
 
-    # Initialize persistent memory using Home Assistant's Entity Registry
+    # Track what we have added to Home Assistant during this runtime session
     tracked_macs: set[str] = set()
-    ent_reg = er.async_get(hass)
-    
-    for entity in er.async_entries_for_config_entry(ent_reg, entry.entry_id):
-        if entity.unique_id and ":" in entity.unique_id:
-            tracked_macs.add(entity.unique_id.upper())
 
-    # Seed any manual MACs that Home Assistant hasn't historically tracked yet
+    # Seed ONLY the manual MACs on startup (ignoring the historical entity registry)
     for manual_mac in manual_mappings:
-        if manual_mac not in tracked_macs:
-            tracked_macs.add(manual_mac)
+        tracked_macs.add(manual_mac)
 
     @callback
     def async_discover_devices() -> None:
@@ -117,15 +113,15 @@ async def async_setup_entry(
 
     entry.async_on_unload(coordinator.async_add_listener(async_discover_devices))
     
-    # Immediately spin up ALL historically tracked and manually seeded entities
+    # Immediately spin up ONLY the manually configured entities on startup
     if tracked_macs:
         initial_entities = [
-            FGWScannerEntity(coordinator, mac, HARDCODED_TRACK_NEW_DEVICES, manual_mappings.get(mac)) 
+            FGWScannerEntity(coordinator, mac, True, manual_mappings.get(mac)) 
             for mac in tracked_macs
         ]
         async_add_entities(initial_entities)
 
-    # Discover any completely new active devices that just hit the network loop
+    # Discover and add any active devices that are online right now
     async_discover_devices()
 
 
